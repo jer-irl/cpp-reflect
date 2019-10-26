@@ -6,4 +6,7 @@ if(NOT Clang_FOUND)
     message(FATAL_ERROR "Clang libraries required")
 endif()
 
+include(cmake/CppReflect.cmake)
+
 add_subdirectory(tools)
+add_subdirectory(test)
