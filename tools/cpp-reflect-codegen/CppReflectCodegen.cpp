@@ -1,3 +1,4 @@
+#include "CodeGeneration.hpp"
 #include <clang/Basic/MemoryBufferCache.h>
 #include <clang/Serialization/ASTWriter.h>
 #include <clang/Tooling/Tooling.h>
@@ -17,6 +18,8 @@ void dumpAstFile(clang::ASTUnit& ast, const std::string& targetPath) {
     std::cout << astOutVector.size() << std::endl;
     std::ofstream astOutFileStream{targetPath};
     astOutFileStream.write(astOutVector.data(), astOutVector.size());
+    std::cout << "HERE\n";
+    std::cout << targetPath << "\n";
 }
 
 } // namespace CppReflect
@@ -35,7 +38,7 @@ int main(int argc, const char* argv[]) {
         } else if (std::string{argv[argIdx]} == "-ocpp") {
             ++argIdx;
             outCppPath = argv[argIdx];
-        } else if (std::string{argv[argIdx]} == "-oastDir") {
+        } else if (std::string{argv[argIdx]} == "-oast") {
             ++argIdx;
             outAstPath = argv[argIdx];
         } else if (argv[argIdx] == "--") {
@@ -54,6 +57,8 @@ int main(int argc, const char* argv[]) {
             clang::tooling::buildASTFromCodeWithArgs(code, compilerArgs, inputFilePath);
 
     CppReflect::dumpAstFile(*ast, outAstPath);
+
+    CppReflect::generateRegistrationFile(*ast, outCppPath, inputFilePath);
 
     return 0;
 }

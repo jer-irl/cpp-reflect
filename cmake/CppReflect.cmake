@@ -5,6 +5,7 @@ function(CppReflect TOOL_PATH TARGET)
 
     foreach(_source ${_sources})
         get_filename_component(_source_name "${_source}" NAME)
+        set(_source_path "${CMAKE_CURRENT_SOURCE_DIR}/${_source}")
         set(_ast_file_path "${CMAKE_BINARY_DIR}/reflect/${_source_name}.ast")
         set(_gen_file_path "${CMAKE_BINARY_DIR}/reflect/${_source_name}-generated.cpp")
         get_source_file_property(_source_compile_flags "${_source}" COMPILE_FLAGS)
@@ -21,10 +22,9 @@ function(CppReflect TOOL_PATH TARGET)
         endif()
 
         add_custom_command(OUTPUT "${_ast_file_path}" "${_gen_file_path}"
-            COMMAND "${TOOL_PATH}" -oast "${_ast_file_path}" -ocpp "${_gen_file_path}" "${_source}" -- ${_compile_flags}
-            MAIN_DEPENDENCY "${_source}"
-            DEPENDS cpp-reflect-codegen
-            IMPLICIT_DEPENDS CXX "${_source}"
+            COMMAND "${TOOL_PATH}" -oast "${_ast_file_path}" -ocpp "${_gen_file_path}" "${_source_path}" -- -c "${_source_path}" ${_compile_flags}
+            DEPENDS cpp-reflect-codegen ${_source}
+            IMPLICIT_DEPENDS CXX ${_source}
         )
 
         target_sources(${TARGET} PRIVATE "${_gen_file_path}")
