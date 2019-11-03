@@ -1,5 +1,5 @@
 ﻿---
-AccessModifierOffset: '0'
+AccessModifierOffset: '-4'
 AlignAfterOpenBracket: AlwaysBreak
 #AlignConsecutiveMacros: 'false'
 AlignConsecutiveAssignments: 'false'
@@ -26,7 +26,7 @@ BreakAfterJavaFieldAnnotations: 'false'
 BreakBeforeBinaryOperators: NonAssignment
 BreakBeforeBraces: Attach
 BreakBeforeTernaryOperators: 'false'
-BreakConstructorInitializers: AfterColon
+BreakConstructorInitializers: BeforeColon
 BreakInheritanceList: AfterColon
 ColumnLimit: '120'
 CompactNamespaces: 'false'
