@@ -19,6 +19,9 @@ static CppReflect::Details::ASTEntry @_ast_symbol_name@_entry{\"@_source_path@\"
 )
 
 function(CppReflect TARGET)
+    target_include_directories(${TARGET} SYSTEM PRIVATE ${CLANG_INCLUDE_DIRS})
+    target_link_libraries(${TARGET} PRIVATE clangTooling stdc++fs)
+
     get_target_property(_clang_executable_loc clang LOCATION)
 
     get_property(_global_compile_options GLOBAL PROPERTY COMPILE_OPTIONS)
@@ -44,10 +47,13 @@ function(CppReflect TARGET)
             set(_compile_flags "${_compile_flags} ${_source_compile_flags}")
         endif()
 
+        get_target_property(_include_directories ${TARGET} INCLUDE_DIRECTORIES)
+
         add_custom_command(OUTPUT "${_ast_file_path}"
-            COMMAND ${_clang_executable_loc} -cc1 -ast-dump-all -o ${_ast_file_path} ${_compile_flags} "${_source_path}"
+            COMMAND ${_clang_executable_loc} -emit-ast -o ${_ast_file_path} -std=c++17 ${_compile_flags} "-I$<JOIN:$<TARGET_PROPERTY:${TARGET},INCLUDE_DIRECTORIES>,;-I>" "${_source_path}"
             DEPENDS ${_source}
             IMPLICIT_DEPENDS CXX ${_source}
+            COMMAND_EXPAND_LISTS
         )
 
         add_custom_command(OUTPUT "${_ast_object_file_path}"
@@ -63,9 +69,6 @@ function(CppReflect TARGET)
         target_sources(${TARGET} PRIVATE "${_gen_file_path}" "${_ast_object_file_path}")
 
         set_source_files_properties("${_ast_object_file_path}" PROPERTIES EXTERNAL_OBJECT true)
-
-        target_include_directories(${TARGET} SYSTEM PRIVATE ${CLANG_INCLUDE_DIRS})
-        target_link_libraries(${TARGET} PRIVATE clangTooling)
 
     endforeach()
 

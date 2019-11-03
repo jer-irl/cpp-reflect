@@ -1,11 +1,13 @@
 #pragma once
 
-#include <clang/Frontend/ASTUnit.h>
+#include <clang/AST/ASTContext.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/CompilerInvocation.h>
 #include <clang/Serialization/ASTReader.h>
 #include <clang/Tooling/JSONCompilationDatabase.h>
 #include <cstdio>
+#include <filesystem>
+#include <type_traits>
 #include <unistd.h>
 #include <unordered_map>
 
@@ -38,7 +40,7 @@ class ASTEntry {
 public:
     explicit ASTEntry(const std::string& translationUnitPath, const char* astBufferBegin, std::size_t astBufferSize);
 
-    clang::ASTContext& getASTUnit(const clang::tooling::CompileCommand& compileCommand) {
+    clang::ASTContext& getASTContext(const clang::tooling::CompileCommand& compileCommand) {
         if (not compilerInstance_.hasASTContext()) {
             auto invocationSPtr = std::make_shared<clang::CompilerInvocation>();
             const std::vector<std::string>& args = compileCommand.CommandLine;
@@ -95,48 +97,88 @@ private:
     const std::size_t astBufferSize_;
     clang::CompilerInstance compilerInstance_;
 
-    // llvm::IntrusiveRefCntPtr<clang::DiagnosticIDs> diagId_;
-    // llvm::IntrusiveRefCntPtr<clang::DiagnosticOptions> diagOpts_;
-    // TextDiagnosticBuffer* DiagsBuffer = new TextDiagnosticBuffer;
-    clang::DiagnosticsEngine diags_; //(DiagID, &*DiagOpts, DiagsBuffer);
+    clang::DiagnosticsEngine diags_;
 };
 
-class ASTRegistry {
+class Registry {
     friend ASTEntry;
     friend CompilationDatabaseEntry;
 
 public:
-    static ASTRegistry& getSharedInstance() {
-        static ASTRegistry registry;
+    static Registry& getSharedInstance() {
+        static Registry registry;
         return registry;
+    }
+
+    const clang::ASTContext& getASTContextForFile(const std::string& path) {
+        if (not compilationDatabase_) {
+            if (not compilationDatabaseEntry_) {
+                std::abort();
+            }
+            compilationDatabase_ = compilationDatabaseEntry_->getCompilationDb();
+        }
+        std::string absolutePath = qualifyPath(compilationDatabase_->getAllFiles(), path);
+
+        if (astEntries_.count(absolutePath) == 1) {
+            return astEntries_.at(path).get().getASTContext(compilationDatabase_->getCompileCommands(absolutePath)[0]);
+        }
+        std::abort();
     }
 
 private:
     void registerASTEntry(const std::string& translationUnitPath, ASTEntry& entry) {
-        asts_.emplace(translationUnitPath, std::reference_wrapper<ASTEntry>{entry});
+        astEntries_.emplace(translationUnitPath, std::reference_wrapper<ASTEntry>{entry});
     }
 
-    void registerCompilationDatabaseEntry(CompilationDatabaseEntry& entry) { compilationDatabase_ = &entry; }
+    void registerCompilationDatabaseEntry(CompilationDatabaseEntry& entry) { compilationDatabaseEntry_ = &entry; }
 
-    std::unordered_map<std::string, std::reference_wrapper<ASTEntry>> asts_;
-    CompilationDatabaseEntry* compilationDatabase_ = nullptr;
+    template<
+            typename ContainerT,
+            std::enable_if_t<std::is_same_v<typename ContainerT::value_type, std::string>, int> = 0>
+    static std::string qualifyPath(const ContainerT& fullPaths, const std::string& searchPathStr) {
+        std::filesystem::path searchPath{searchPathStr};
+        if (searchPath.is_absolute()) {
+            return searchPathStr;
+        }
+        for (const std::string& absPathStr : fullPaths) {
+            std::filesystem::path absPath{absPathStr};
+            auto absPathStartIter = absPath.begin();
+            while (absPathStartIter != absPath.end()) {
+                auto absPathIter = absPathStartIter;
+                auto searchPathIter = searchPath.begin();
+                while (*absPathIter == *searchPathIter) {
+                    ++absPathIter;
+                    ++searchPathIter;
+                    if (absPathIter == absPath.end() and searchPathIter == searchPath.end()) {
+                        return absPathStr;
+                    }
+                }
+
+                ++absPathStartIter;
+            }
+        }
+        std::abort();
+    }
+
+    std::unordered_map<std::string, std::reference_wrapper<ASTEntry>> astEntries_;
+    CompilationDatabaseEntry* compilationDatabaseEntry_ = nullptr;
+    std::unique_ptr<clang::tooling::JSONCompilationDatabase> compilationDatabase_;
 };
 
 inline ASTEntry::ASTEntry(const std::string& translationUnitPath, const char* astBufferBegin, std::size_t astBufferSize)
-        : astBufferBegin_{astBufferBegin}, astBufferSize_{astBufferSize}
-          //, diagId_{new clang::DiagnosticIDs{}}, diagOpts_{new clang::DiagnosticOptions{}}
-          ,
-          diags_{nullptr, nullptr, nullptr} {
-    ASTRegistry::getSharedInstance().registerASTEntry(translationUnitPath, *this);
+        : astBufferBegin_{astBufferBegin}, astBufferSize_{astBufferSize}, diags_{nullptr, nullptr, nullptr} {
+    Registry::getSharedInstance().registerASTEntry(translationUnitPath, *this);
 }
 
 inline CompilationDatabaseEntry::CompilationDatabaseEntry(const char* bufferBegin, std::size_t bufferSize)
         : bufferBegin_{bufferBegin}, bufferSize_{bufferSize} {
-    ASTRegistry::getSharedInstance().registerCompilationDatabaseEntry(*this);
+    Registry::getSharedInstance().registerCompilationDatabaseEntry(*this);
 }
 
 } // namespace Details
 
-inline const clang::ASTUnit& astForTranslationUnit(const std::string& path) {}
+inline const clang::ASTContext& astForTranslationUnit(const std::string& path) {
+    return Details::Registry::getSharedInstance().getASTContextForFile(path);
+}
 
 } // namespace CppReflect
