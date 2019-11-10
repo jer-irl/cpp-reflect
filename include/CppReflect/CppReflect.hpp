@@ -3,8 +3,12 @@
 #include <clang/AST/ASTContext.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/CompilerInvocation.h>
+#include <clang/Frontend/TextDiagnosticBuffer.h>
 #include <clang/Serialization/ASTReader.h>
 #include <clang/Tooling/JSONCompilationDatabase.h>
+#include <llvm/ADT/SmallString.h>
+#include <llvm/Support/Program.h>
+#include <llvm/Support/TargetSelect.h>
 #include <cstdio>
 #include <filesystem>
 #include <type_traits>
@@ -14,9 +18,26 @@
 namespace CppReflect {
 namespace Details {
 
+/// From driver.cpp
+inline std::string GetExecutablePath(const char* Argv0, bool CanonicalPrefixes) {
+    if (!CanonicalPrefixes) {
+        llvm::SmallString<128> ExecutablePath(Argv0);
+        // Do a PATH lookup if Argv0 isn't a valid path.
+        if (!llvm::sys::fs::exists(ExecutablePath))
+            if (llvm::ErrorOr<std::string> P = llvm::sys::findProgramByName(ExecutablePath))
+                ExecutablePath = *P;
+        return ExecutablePath.str();
+    }
+
+    // This just needs to be some symbol in the binary; C++ doesn't
+    // allow taking the address of ::main however.
+    void* P = (void*) (intptr_t) GetExecutablePath;
+    return llvm::sys::fs::getMainExecutable(Argv0, P);
+}
+
 class CompilationDatabaseEntry {
 public:
-    explicit CompilationDatabaseEntry(const char* bufferBegin, std::size_t bufferSize);
+    explicit CompilationDatabaseEntry(const char* bufferBegin, const char* buffer);
 
     std::unique_ptr<clang::tooling::JSONCompilationDatabase> getCompilationDb() {
         llvm::StringRef buffer{bufferBegin_, bufferSize_};
@@ -38,18 +59,53 @@ private:
 
 class ASTEntry {
 public:
-    explicit ASTEntry(const std::string& translationUnitPath, const char* astBufferBegin, std::size_t astBufferSize);
+    explicit ASTEntry(const std::string& translationUnitPath, const char* astBufferBegin, const char* astBufferEnd);
 
     clang::ASTContext& getASTContext(const clang::tooling::CompileCommand& compileCommand) {
         if (not compilerInstance_.hasASTContext()) {
-            auto invocationSPtr = std::make_shared<clang::CompilerInvocation>();
+            // Copied from clang cc1 main
+            llvm::IntrusiveRefCntPtr<clang::DiagnosticIDs> diagID{new clang::DiagnosticIDs{}};
+
+            // Buffer diagnostics from argument parsing so that we can output them using a
+            // well formed diagnostic object.
+            llvm::IntrusiveRefCntPtr<clang::DiagnosticOptions> diagOpts = new clang::DiagnosticOptions{};
+            clang::TextDiagnosticBuffer* diagsBuffer = new clang::TextDiagnosticBuffer;
+            clang::DiagnosticsEngine diags(diagID, &*diagOpts, diagsBuffer);
             const std::vector<std::string>& args = compileCommand.CommandLine;
             const char** const argArray = new const char*[args.size()];
             for (std::uint_fast8_t i = 0; i < args.size(); ++i) {
                 argArray[i] = args[i].data();
             }
-            clang::CompilerInvocation::CreateFromArgs(*invocationSPtr, argArray, argArray + args.size() - 1, diags_);
-            compilerInstance_.setInvocation(invocationSPtr);
+            bool success = clang::CompilerInvocation::CreateFromArgs(
+                    compilerInstance_.getInvocation(), argArray, argArray + args.size() - 1, diags);
+
+            // Infer the builtin include path if unspecified.
+            if (compilerInstance_.getHeaderSearchOpts().UseBuiltinIncludes
+                && compilerInstance_.getHeaderSearchOpts().ResourceDir.empty())
+                compilerInstance_.getHeaderSearchOpts().ResourceDir =
+                        clang::CompilerInvocation::GetResourcesPath(argArray[0], (void *)(intptr_t) GetExecutablePath);
+
+            // Create the actual diagnostics engine.
+            compilerInstance_.createDiagnostics();
+            if (!compilerInstance_.hasDiagnostics())
+                std::abort();
+
+            // Set an error handler, so that any LLVM backend diagnostics go through our
+            // error handler.
+            //llvm::install_fatal_error_handler(LLVMErrorHandler, static_cast<void*>(&Clang->getDiagnostics()));
+
+            diagsBuffer->FlushDiagnostics(compilerInstance_.getDiagnostics());
+            if (!success)
+                std::abort();
+
+            // Execute the frontend actions.
+            /*
+            {
+                llvm::TimeTraceScope TimeScope("ExecuteCompiler", StringRef(""));
+                Success = ExecuteCompilerInvocation(Clang.get());
+            }
+            */
+
             compilerInstance_.createPreprocessor(clang::TranslationUnitKind::TU_Complete);
             compilerInstance_.createASTContext();
 
@@ -96,8 +152,6 @@ private:
     const char* const astBufferBegin_;
     const std::size_t astBufferSize_;
     clang::CompilerInstance compilerInstance_;
-
-    clang::DiagnosticsEngine diags_;
 };
 
 class Registry {
@@ -120,7 +174,9 @@ public:
         std::string absolutePath = qualifyPath(compilationDatabase_->getAllFiles(), path);
 
         if (astEntries_.count(absolutePath) == 1) {
-            return astEntries_.at(path).get().getASTContext(compilationDatabase_->getCompileCommands(absolutePath)[0]);
+            return astEntries_.at(absolutePath)
+                    .get()
+                    .getASTContext(compilationDatabase_->getCompileCommands(absolutePath)[0]);
         }
         std::abort();
     }
@@ -165,13 +221,13 @@ private:
     std::unique_ptr<clang::tooling::JSONCompilationDatabase> compilationDatabase_;
 };
 
-inline ASTEntry::ASTEntry(const std::string& translationUnitPath, const char* astBufferBegin, std::size_t astBufferSize)
-        : astBufferBegin_{astBufferBegin}, astBufferSize_{astBufferSize}, diags_{nullptr, nullptr, nullptr} {
+inline ASTEntry::ASTEntry(const std::string& translationUnitPath, const char* astBufferBegin, const char* astBufferEnd)
+        : astBufferBegin_{astBufferBegin}, astBufferSize_{static_cast<std::size_t>(astBufferEnd - astBufferBegin)} {
     Registry::getSharedInstance().registerASTEntry(translationUnitPath, *this);
 }
 
-inline CompilationDatabaseEntry::CompilationDatabaseEntry(const char* bufferBegin, std::size_t bufferSize)
-        : bufferBegin_{bufferBegin}, bufferSize_{bufferSize} {
+inline CompilationDatabaseEntry::CompilationDatabaseEntry(const char* bufferBegin, const char* bufferEnd)
+        : bufferBegin_{bufferBegin}, bufferSize_{static_cast<std::size_t>(bufferEnd - bufferBegin)} {
     Registry::getSharedInstance().registerCompilationDatabaseEntry(*this);
 }
 

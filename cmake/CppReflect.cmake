@@ -1,20 +1,18 @@
 set(CppReflectASTRegistrationFileTemplate
 "
 #include <CppReflect/CppReflect.hpp>
-extern const char @_ast_symbol_name@_start[];
-extern const char @_ast_symbol_name@_end[];
-extern const size_t @_ast_symbol_name@_size;
-static CppReflect::Details::ASTEntry @_ast_symbol_name@_entry{\"@_source_path@\", @_ast_symbol_name@_start, @_ast_symbol_name@_size};
+extern const char @_ast_symbol_name@_start;
+extern const char @_ast_symbol_name@_end;
+static CppReflect::Details::ASTEntry @_ast_symbol_name@_entry{\"@_source_path@\", &@_ast_symbol_name@_start, &@_ast_symbol_name@_end};
 "
 )
 
 set(CppReflectCompilationDatabaseFileTemplate
 "
 #include <CppReflect/CppReflect.hpp>
-extern const char @_ast_symbol_name@_start[];
-extern const char @_ast_symbol_name@_end[];
-extern const size_t @_ast_symbol_name@_size;
-static CppReflect::Details::ASTEntry @_ast_symbol_name@_entry{\"@_source_path@\", @_ast_symbol_name@_start, @_ast_symbol_name@_size};
+extern const char @_compilation_db_symbol_name@_start;
+extern const char @_compilation_db_symbol_name@_end;
+static CppReflect::Details::CompilationDatabaseEntry @_compilation_db_symbol_name@_entry{&@_compilation_db_symbol_name@_start, &@_compilation_db_symbol_name@_end};
 "
 )
 
