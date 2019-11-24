@@ -48,7 +48,7 @@ function(CppReflect TARGET)
         get_target_property(_include_directories ${TARGET} INCLUDE_DIRECTORIES)
 
         add_custom_command(OUTPUT "${_ast_file_path}"
-            COMMAND ${_clang_executable_loc} -emit-ast -o ${_ast_file_path} -std=c++17 ${_compile_flags} "-I$<JOIN:$<TARGET_PROPERTY:${TARGET},INCLUDE_DIRECTORIES>,;-I>" "${_source_path}"
+            COMMAND ${_clang_executable_loc} -emit-ast -o ${_ast_file_path} -std=c++17 ${_compile_flags} -I${LLVM_LIBRARY_DIR}/clang/8.0.0/include "-I$<JOIN:$<TARGET_PROPERTY:${TARGET},INCLUDE_DIRECTORIES>,;-I>" "${_source_path}"
             DEPENDS ${_source}
             IMPLICIT_DEPENDS CXX ${_source}
             COMMAND_EXPAND_LISTS
