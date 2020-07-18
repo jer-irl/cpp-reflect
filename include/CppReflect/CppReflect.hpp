@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clang/AST/ASTContext.h>
+#include <clang/Basic/Diagnostic.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/CompilerInvocation.h>
 #include <clang/Frontend/TextDiagnosticBuffer.h>
@@ -72,12 +73,15 @@ public:
             clang::TextDiagnosticBuffer* diagsBuffer = new clang::TextDiagnosticBuffer;
             clang::DiagnosticsEngine diags(diagID, &*diagOpts, diagsBuffer);
             const std::vector<std::string>& args = compileCommand.CommandLine;
-            const char** const argArray = new const char*[args.size()];
-            for (std::uint_fast8_t i = 0; i < args.size(); ++i) {
-                argArray[i] = args[i].data();
+            std::vector<const char *> argVector;
+            for (const std::string& arg : args) {
+                argVector.emplace_back(arg.c_str());
             }
+            clang::ArrayRef<const char *> argArray{argVector};
+            compilerInstance_.setDiagnostics(std::addressof(diags));
             bool success = clang::CompilerInvocation::CreateFromArgs(
-                    compilerInstance_.getInvocation(), argArray, argArray + args.size() - 1, diags);
+                compilerInstance_.getInvocation(), argArray, compilerInstance_.getDiagnostics()
+            );
 
             // Infer the builtin include path if unspecified.
             if (compilerInstance_.getHeaderSearchOpts().UseBuiltinIncludes
@@ -86,7 +90,7 @@ public:
                         clang::CompilerInvocation::GetResourcesPath(argArray[0], (void *)(intptr_t) GetExecutablePath);
 
             // Create the actual diagnostics engine.
-            compilerInstance_.createDiagnostics();
+            //compilerInstance_.createDiagnostics();
             if (!compilerInstance_.hasDiagnostics())
                 std::abort();
 
@@ -112,10 +116,13 @@ public:
             std::FILE* astFile = writeASTFile();
             std::string astFilePath = getFilePath(astFile);
 
-            clang::ASTReader reader{compilerInstance_.getPreprocessor(),
-                                    &compilerInstance_.getASTContext(),
-                                    compilerInstance_.getPCHContainerReader(),
-                                    {}};
+            clang::ASTReader reader{
+                    compilerInstance_.getPreprocessor(),
+                    compilerInstance_.getModuleCache(),
+                    &compilerInstance_.getASTContext(),
+                    compilerInstance_.getPCHContainerReader(),
+                    clang::ArrayRef<std::shared_ptr<clang::ModuleFileExtension>>{}
+            };
             clang::ASTReader::ASTReadResult result = reader.ReadAST(
                     astFilePath, clang::ASTReader::ModuleKind::MK_MainFile, clang::SourceLocation{},
                     clang::ASTReader::LoadFailureCapabilities::ARR_None);
